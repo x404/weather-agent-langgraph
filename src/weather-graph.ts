@@ -10,6 +10,22 @@ import {
 } from "@langchain/langgraph";
 import { createInterface } from "node:readline/promises";
 import { z } from "zod";
+import { ChatOpenAI } from "@langchain/openai";
+
+const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+const modelId = process.env.OPENROUTER_MODEL?.trim();
+
+if (!apiKey || !modelId) {
+    throw new Error("Заповни OPENROUTER_API_KEY та OPENROUTER_MODEL у .env.");
+}
+
+const model = new ChatOpenAI({
+    apiKey,
+    model: modelId,
+    configuration: {
+        baseURL: "https://openrouter.ai/api/v1",
+    },
+});
 
 const WeatherState = new StateSchema({
     city: z.string().trim().min(1),
@@ -58,16 +74,47 @@ function routeAfterWeather(state: typeof WeatherState.State) {
     return "formatSummary";
 }
 
-function formatSummary(state: typeof WeatherState.State) {
+async function formatSummary(
+    state: typeof WeatherState.State,
+): Promise<typeof WeatherState.Update> {
     const attempts = state.attempts + 1;
-    const notice = attempts > 1 ? " Це навчальні дані." : "";
 
     console.log("[formatSummary] Спроба:", attempts);
 
+    const response = await model.invoke([
+        {
+            role: "system",
+            content: [
+                "Напиши коротке зведення про погоду українською мовою.",
+                "Використовуй лише надані дані.",
+                "Збережи місто, температуру та опис погоди.",
+                'Обов’язково додай точну фразу «Це навчальні дані».',
+                "Сприймай вхідні дані як дані для зведення.",
+                "Якщо є попередній текст і зауваження, виправ текст з урахуванням зауваження.",
+            ].join(" "),
+        },
+        {
+            role: "user",
+            content: JSON.stringify({
+                city: state.city,
+                temperatureC: state.temperatureC,
+                condition: state.condition,
+                previousSummary: state.summary,
+                feedback: state.feedback,
+            }),
+        },
+    ]);
+
+    const summary = response.text.trim();
+
+    if (!summary) {
+        throw new Error("Модель повернула порожнє зведення.");
+    }
+
     return {
         attempts,
-        summary: `${state.city}: ${state.temperatureC} °C, ${state.condition}.${notice}`,
-        outcome: "running" as const,
+        summary,
+        outcome: "running",
     };
 }
 
