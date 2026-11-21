@@ -1,4 +1,14 @@
-import { END, START, StateGraph, StateSchema } from "@langchain/langgraph";
+import {
+    Command,
+    END,
+    interrupt,
+    MemorySaver,
+    START,
+    StateGraph,
+    StateSchema,
+    isInterrupted,
+} from "@langchain/langgraph";
+import { createInterface } from "node:readline/promises";
 import { z } from "zod";
 
 const WeatherState = new StateSchema({
@@ -15,6 +25,7 @@ const WeatherState = new StateSchema({
         "needs_revision",
         "approved",
         "retry_limit_reached",
+        "rejected",
     ]).default("running"),
 });
 
@@ -86,16 +97,36 @@ function reviewSummary(
 
 function routeAfterReview(state: typeof WeatherState.State) {
     if (state.outcome === "needs_revision") {
-        return "formatSummary";
+        return "humanApproval";
     }
 
     return END;
+}
+
+function humanApproval(
+    state: typeof WeatherState.State,
+): typeof WeatherState.Update {
+    const shouldRetry = z.boolean().parse(
+        interrupt({
+            summary: state.summary,
+            feedback: state.feedback,
+        }),
+    );
+
+    return {
+        outcome: shouldRetry ? "needs_revision" : "rejected",
+    };
+}
+
+function routeAfterApproval(state: typeof WeatherState.State) {
+    return state.outcome === "needs_revision" ? "formatSummary" : END;
 }
 
 const graph = new StateGraph(WeatherState)
     .addNode("loadWeather", loadWeather)
     .addNode("formatSummary", formatSummary)
     .addNode("reviewSummary", reviewSummary)
+    .addNode("humanApproval", humanApproval)
     .addEdge(START, "loadWeather")
     .addConditionalEdges("loadWeather", routeAfterWeather, [
         "formatSummary",
@@ -103,12 +134,45 @@ const graph = new StateGraph(WeatherState)
     ])
     .addEdge("formatSummary", "reviewSummary")
     .addConditionalEdges("reviewSummary", routeAfterReview, [
+        "humanApproval",
+        END,
+    ])
+    .addConditionalEdges("humanApproval", routeAfterApproval, [
         "formatSummary",
         END,
     ])
-    .compile();
+    .compile({ checkpointer: new MemorySaver() });
 
 const city = process.argv[2]?.trim() || "Київ";
-const result = await graph.invoke({ city });
+const config = {
+    configurable: { thread_id: "weather-demo" },
+};
+
+let result = await graph.invoke({ city }, config);
+
+while (isInterrupted(result) && result.__interrupt__.length > 0) {
+    console.log("Потрібне рішення:", result.__interrupt__[0]?.value);
+
+    const terminal = createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+
+    let shouldRetry: boolean;
+
+    try {
+        const answer = await terminal.question(
+            "Дозволити доопрацювання? [так/ні]: ",
+        );
+        shouldRetry = answer.trim().toLowerCase() === "так";
+    } finally {
+        terminal.close();
+    }
+
+    result = await graph.invoke(
+        new Command({ resume: shouldRetry }),
+        config,
+    );
+}
 
 console.log("Підсумковий стан:", result);
