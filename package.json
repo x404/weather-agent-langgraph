@@ -1,0 +1,32 @@
+{
+  "name": "weather-agent-langgraph",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "start": "tsx --env-file=.env src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/x404/weather-agent-langgraph.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/x404/weather-agent-langgraph/issues"
+  },
+  "homepage": "https://github.com/x404/weather-agent-langgraph#readme",
+  "dependencies": {
+    "@langchain/core": "^1.5.0",
+    "@langchain/openai": "^1.8.5",
+    "langchain": "^1.6.7",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
