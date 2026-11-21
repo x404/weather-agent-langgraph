@@ -20,6 +20,7 @@
   "homepage": "https://github.com/x404/weather-agent-langgraph#readme",
   "dependencies": {
     "@langchain/core": "^1.5.0",
+    "@langchain/langgraph": "^1.7.5",
     "@langchain/openai": "^1.8.5",
     "langchain": "^1.6.7",
     "zod": "^4.6.7"
