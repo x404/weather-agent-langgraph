@@ -1,4 +1,4 @@
-import { isInterrupted } from "@langchain/langgraph";
+import { Command, isInterrupted } from "@langchain/langgraph";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -13,6 +13,15 @@ const StartReportSchema = z.object({
     city: z.string().trim().min(1),
     maxAttempts: z.number().int().min(1).max(10).default(2),
 }).strict();
+
+const DecisionSchema = z.object({
+    threadId: z.string().uuid(),
+    body: z.object({
+        shouldRetry: z.boolean(),
+    }).strict(),
+});
+
+const resumingThreads = new Set<string>();
 
 app.post("/api/weather-reports", async (request, response) => {
     const parsed = StartReportSchema.safeParse(request.body);
@@ -57,6 +66,77 @@ app.post("/api/weather-reports", async (request, response) => {
     }
 });
 
+app.post("/api/weather-reports/:threadId/decision", async (request, response) => {
+    const parsed = DecisionSchema.safeParse({
+        threadId: request.params.threadId,
+        body: request.body,
+    });
+
+    if (!parsed.success) {
+        response.status(400).json({
+            error: "Передай коректний threadId та shouldRetry зі значенням true або false.",
+        });
+        return;
+    }
+
+    const { threadId, body } = parsed.data;
+    const config = {
+        configurable: { thread_id: threadId },
+        recursionLimit: 50,
+    };
+
+    if (resumingThreads.has(threadId)) {
+        response.status(409).json({
+            error: "Рішення для цього зведення вже обробляється.",
+        });
+        return;
+    }
+
+    resumingThreads.add(threadId);
+
+    try {
+        const snapshot = await graph.getState(config);
+
+        const awaitingDecision = snapshot.tasks.some(
+            (task) => task.interrupts.length > 0,
+        );
+
+        if (!awaitingDecision) {
+            response.status(404).json({
+                error: "Зведення не знайдено або воно не очікує рішення.",
+            });
+            return;
+        }
+
+        const result = await graph.invoke(
+            new Command({ resume: body.shouldRetry }),
+            config,
+        );
+
+        if (isInterrupted(result) && result.__interrupt__.length > 0) {
+            response.status(202).json({
+                status: "paused",
+                threadId,
+                interrupts: result.__interrupt__,
+            });
+            return;
+        }
+
+        response.status(200).json({
+            status: "completed",
+            threadId,
+            state: result,
+        });
+    } catch (error) {
+        console.error("Не вдалося продовжити граф:", error);
+
+        response.status(500).json({
+            error: "Не вдалося продовжити підготовку зведення.",
+        });
+    } finally {
+        resumingThreads.delete(threadId);
+    }
+});
 app.listen(3000, "127.0.0.1", () => {
     console.log("Сервер запущено на http://127.0.0.1:3000");
 });
