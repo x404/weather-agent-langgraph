@@ -12,20 +12,32 @@ import { createInterface } from "node:readline/promises";
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
 
-const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-const modelId = process.env.OPENROUTER_MODEL?.trim();
+const mode = z.enum(["live", "scripted"]).parse(
+    process.env.WEATHER_GRAPH_MODE ?? "live",
+);
 
-if (!apiKey || !modelId) {
-    throw new Error("Заповни OPENROUTER_API_KEY та OPENROUTER_MODEL у .env.");
+function createModel() {
+    if (mode === "scripted") {
+        return undefined;
+    }
+
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    const modelId = process.env.OPENROUTER_MODEL?.trim();
+
+    if (!apiKey || !modelId) {
+        throw new Error("Заповни OPENROUTER_API_KEY та OPENROUTER_MODEL у .env.");
+    }
+
+    return new ChatOpenAI({
+        apiKey,
+        model: modelId,
+        configuration: {
+            baseURL: "https://openrouter.ai/api/v1",
+        },
+    });
 }
 
-const model = new ChatOpenAI({
-    apiKey,
-    model: modelId,
-    configuration: {
-        baseURL: "https://openrouter.ai/api/v1",
-    },
-});
+const model = createModel();
 
 const WeatherState = new StateSchema({
     city: z.string().trim().min(1),
@@ -80,6 +92,16 @@ async function formatSummary(
     const attempts = state.attempts + 1;
 
     console.log("[formatSummary] Спроба:", attempts);
+
+    if (!model) {
+        const notice = attempts > 1 ? " Це навчальні дані." : "";
+
+        return {
+            attempts,
+            summary: `${state.city}: ${state.temperatureC} °C, ${state.condition}.${notice}`,
+            outcome: "running",
+        };
+    }
 
     const response = await model.invoke([
         {
@@ -191,11 +213,15 @@ const graph = new StateGraph(WeatherState)
     .compile({ checkpointer: new MemorySaver() });
 
 const city = process.argv[2]?.trim() || "Київ";
+const maxAttempts = z.coerce.number().int().min(1).parse(
+    process.argv[3] ?? "2",
+);
+
 const config = {
     configurable: { thread_id: "weather-demo" },
 };
 
-let result = await graph.invoke({ city }, config);
+let result = await graph.invoke({ city, maxAttempts }, config);
 
 while (isInterrupted(result) && result.__interrupt__.length > 0) {
     console.log("Потрібне рішення:", result.__interrupt__[0]?.value);
