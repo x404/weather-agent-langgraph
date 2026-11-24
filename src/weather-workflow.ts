@@ -124,6 +124,16 @@ async function formatSummary(
         },
     ]);
 
+    const finishReason = response.response_metadata.finish_reason;
+
+    if (finishReason !== "stop") {
+        throw new Error(
+            `Модель не завершила зведення належним чином. Причина: ${
+                finishReason ?? "невідома"
+            }.`,
+        );
+    }
+
     const summary = response.text.trim();
 
     if (!summary) {
