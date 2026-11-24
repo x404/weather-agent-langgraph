@@ -126,6 +126,12 @@ async function formatSummary(
         },
     ], config);
 
+    const refusal = response.additional_kwargs.refusal;
+
+    if (refusal) {
+        throw new Error("Модель відмовилася створювати зведення.");
+    }
+
     const finishReason = response.response_metadata.finish_reason;
 
     if (finishReason !== "stop") {
