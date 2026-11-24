@@ -1,4 +1,8 @@
-import { Command, isInterrupted } from "@langchain/langgraph";
+import {
+    Command,
+    GraphRecursionError,
+    isInterrupted,
+} from "@langchain/langgraph";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -57,13 +61,21 @@ app.post("/api/weather-reports", async (request, response) => {
             threadId,
             state: result,
         });
-    } catch (error) {
-        console.error("Не вдалося виконати граф:", error);
+        } catch (error) {
+            console.error("Не вдалося виконати граф:", error);
 
-        response.status(500).json({
-            error: "Не вдалося підготувати зведення.",
-        });
-    }
+            if (error instanceof GraphRecursionError) {
+                response.status(422).json({
+                    code: "GRAPH_RECURSION_LIMIT",
+                    error: "Граф перевищив дозволену кількість кроків.",
+                });
+                return;
+            }
+
+            response.status(500).json({
+                error: "Не вдалося підготувати зведення.",
+            });
+        }
 });
 
 app.post("/api/weather-reports/:threadId/decision", async (request, response) => {
@@ -129,6 +141,14 @@ app.post("/api/weather-reports/:threadId/decision", async (request, response) =>
         });
     } catch (error) {
         console.error("Не вдалося продовжити граф:", error);
+
+        if (error instanceof GraphRecursionError) {
+            response.status(422).json({
+                code: "GRAPH_RECURSION_LIMIT",
+                error: "Граф перевищив дозволену кількість кроків.",
+            });
+            return;
+        }
 
         response.status(500).json({
             error: "Не вдалося продовжити підготовку зведення.",
