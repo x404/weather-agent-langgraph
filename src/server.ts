@@ -39,9 +39,20 @@ app.post("/api/weather-reports", async (request, response) => {
     }
 
     const threadId = randomUUID();
+    const controller = new AbortController();
+
+    const handleClose = () => {
+        if (!response.writableEnded) {
+            controller.abort();
+        }
+    };
+
+    response.on("close", handleClose);
+
     const config = {
         configurable: { thread_id: threadId },
         recursionLimit: 50,
+        signal: controller.signal,
     };
 
     try {
@@ -62,6 +73,11 @@ app.post("/api/weather-reports", async (request, response) => {
             state: result,
         });
         } catch (error) {
+            if (controller.signal.aborted) {
+                console.log("Клієнт відключився. Виконання скасовано.");
+                return;
+            }
+
             console.error("Не вдалося виконати граф:", error);
 
             if (error instanceof GraphRecursionError) {
@@ -75,8 +91,10 @@ app.post("/api/weather-reports", async (request, response) => {
             response.status(500).json({
                 error: "Не вдалося підготувати зведення.",
             });
+        } finally {
+            response.off("close", handleClose);
         }
-});
+    });
 
 app.post("/api/weather-reports/:threadId/decision", async (request, response) => {
     const parsed = DecisionSchema.safeParse({
@@ -92,10 +110,6 @@ app.post("/api/weather-reports/:threadId/decision", async (request, response) =>
     }
 
     const { threadId, body } = parsed.data;
-    const config = {
-        configurable: { thread_id: threadId },
-        recursionLimit: 50,
-    };
 
     if (resumingThreads.has(threadId)) {
         response.status(409).json({
@@ -105,6 +119,22 @@ app.post("/api/weather-reports/:threadId/decision", async (request, response) =>
     }
 
     resumingThreads.add(threadId);
+
+    const controller = new AbortController();
+
+    const handleClose = () => {
+        if (!response.writableEnded) {
+            controller.abort();
+        }
+    };
+
+    response.on("close", handleClose);
+
+    const config = {
+        configurable: { thread_id: threadId },
+        recursionLimit: 50,
+        signal: controller.signal,
+    };
 
     try {
         const snapshot = await graph.getState(config);
@@ -140,6 +170,11 @@ app.post("/api/weather-reports/:threadId/decision", async (request, response) =>
             state: result,
         });
     } catch (error) {
+        if (controller.signal.aborted) {
+            console.log("Клієнт відключився. Продовження графа скасовано.");
+            return;
+        }
+
         console.error("Не вдалося продовжити граф:", error);
 
         if (error instanceof GraphRecursionError) {
@@ -154,6 +189,7 @@ app.post("/api/weather-reports/:threadId/decision", async (request, response) =>
             error: "Не вдалося продовжити підготовку зведення.",
         });
     } finally {
+        response.off("close", handleClose);
         resumingThreads.delete(threadId);
     }
 });

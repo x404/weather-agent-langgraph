@@ -8,6 +8,7 @@ import {
 } from "@langchain/langgraph";
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
+import type { RunnableConfig } from "@langchain/core/runnables";
 
 const mode = z.enum(["live", "scripted"]).parse(
     process.env.WEATHER_GRAPH_MODE ?? "live",
@@ -85,6 +86,7 @@ function routeAfterWeather(state: typeof WeatherState.State) {
 
 async function formatSummary(
     state: typeof WeatherState.State,
+    config: RunnableConfig,
 ): Promise<typeof WeatherState.Update> {
     const attempts = state.attempts + 1;
 
@@ -122,7 +124,7 @@ async function formatSummary(
                 feedback: state.feedback,
             }),
         },
-    ]);
+    ], config);
 
     const finishReason = response.response_metadata.finish_reason;
 
