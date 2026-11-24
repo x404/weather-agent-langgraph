@@ -113,6 +113,24 @@ npx tsx --env-file=.env src/server.ts
 Continue a paused workflow using the same server process and `threadId`.
 Restarting the server clears its checkpoints.
 
+## Error handling and cancellation
+
+Model-generated summaries are rejected if the response contains a
+structured refusal, its finish reason is not `stop`, or its text is empty.
+
+Exceeding the graph recursion limit returns HTTP 422 with the code
+`GRAPH_RECURSION_LIMIT`. Other execution errors return HTTP 500.
+
+`maxAttempts` limits summary generation attempts.
+`recursionLimit` limits graph execution steps.
+
+Both HTTP endpoints pass an abort signal to the graph.
+The summary generation node forwards it to the model.
+
+If a client disconnects before the response ends, the server signals
+cancellation and removes the connection listener when the handler finishes.
+Cancellation does not guarantee that the provider immediately stops generation.
+
 ## Project files
 
 - `src/index.ts` — LangChain agent with a weather tool.
